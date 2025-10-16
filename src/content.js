@@ -2,7 +2,9 @@ const EXACT_SELECTORS = [
   'button[aria-label="Good response"]',
   'button[aria-label="Bad response"]',
   'button[data-testid="good-response-turn-action-button"]',
-  'button[data-testid="bad-response-turn-action-button"]'
+  'button[data-testid="bad-response-turn-action-button"]',
+  'button[aria-label="Like this image"]',
+  'button[aria-label="Dislike this image"]'
 ];
 
 const FUZZY_SELECTORS = [
@@ -10,7 +12,9 @@ const FUZZY_SELECTORS = [
   'button[aria-label*="bad" i][aria-label*="response" i]',
   'button[aria-label*="thumb" i]',
   'button[data-testid*="response" i]',
-  'button[data-testid*="feedback" i]'
+  'button[data-testid*="feedback" i]',
+  'button[aria-label*="like this" i]',
+  'button[aria-label*="dislike this" i]'
 ];
 
 // Fuzzy keyword matching catches feedback buttons even if ChatGPT changes
@@ -27,7 +31,17 @@ const KEYWORDS = [
   'feedback-good',
   'feedback-bad',
   'feedback positive',
-  'feedback negative'
+  'feedback negative',
+  'like this image',
+  'dislike this image',
+  'like-image',
+  'dislike-image'
+];
+
+// Captures chat-level helpfulness prompts that wrap feedback buttons in newer layouts
+const PROMPT_TEXT_SNIPPETS = [
+  'is this conversation helpful',
+  'is this chat helpful'
 ];
 
 // Marks buttons as processed to avoid double-removal when a button matches multiple selectors
@@ -102,13 +116,62 @@ const stripButton = (button) => {
 };
 
 /**
+ * Determines whether an element is the helpfulness prompt container
+ */
+const isHelpfulPromptContainer = (element) => {
+  if (!(element instanceof HTMLElement)) return false;
+  if (element.getAttribute(MARK_ATTRIBUTE) === 'removed') return false;
+
+  const text = element.textContent?.toLowerCase() ?? '';
+  if (!PROMPT_TEXT_SNIPPETS.some((snippet) => text.includes(snippet))) {
+    return false;
+  }
+
+  const buttons = element.querySelectorAll('button');
+  return buttons.length >= 2 && buttons.length <= 4;
+};
+
+/**
+ * Walks up the tree from a button to find the helpfulness prompt wrapper
+ */
+const findHelpfulPromptContainer = (button) => {
+  let current = button.parentElement;
+
+  while (current && current instanceof HTMLElement && current !== document.body) {
+    if (isHelpfulPromptContainer(current)) {
+      return current;
+    }
+
+    // Stop climbing once we hit a chat turn or main layout containers so we don't remove too much
+    if (current.matches('main, article, section, form')) {
+      return null;
+    }
+
+    current = current.parentElement;
+  }
+
+  return null;
+};
+
+/**
  * Finds and removes all feedback buttons on the page
  */
 const stripAll = () => {
   const buttons = new Set(document.querySelectorAll(SELECTOR));
   buttons.forEach((button) => {
     if (isFeedbackButton(button)) {
+      const promptContainer = findHelpfulPromptContainer(button);
       stripButton(button);
+
+      if (promptContainer) {
+        promptContainer.setAttribute(MARK_ATTRIBUTE, 'removed');
+        const parent = promptContainer.parentElement;
+        promptContainer.remove();
+
+        if (parent instanceof HTMLElement) {
+          pruneEmptyParents(parent);
+        }
+      }
     }
   });
 };
